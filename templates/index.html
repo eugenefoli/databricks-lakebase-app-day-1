@@ -511,8 +511,11 @@
             : "-";
           
           const analysis = analysisMap[row.symbol];
-          let recommendationHtml = '<span style="color:#999;">Not analyzed</span>';
-          let confidenceHtml = '-';
+          let recommendationHtml = '<span style="color:#64748b;font-size:12px;">-</span>';
+          let confidenceHtml = '<span style="color:#64748b;font-size:12px;">-</span>';
+          let sma20Html = '<span style="color:#64748b;font-size:12px;">-</span>';
+          let sma50Html = '<span style="color:#64748b;font-size:12px;">-</span>';
+          let rsiHtml = '<span style="color:#64748b;font-size:12px;">-</span>';
           
           if (analysis) {
             const rec = analysis.recommendation;
@@ -528,11 +531,29 @@
                 <span class="confidence-text">${conf}%</span>
               </div>
             `;
+            
+            // Display technical indicators
+            if (analysis.sma_20 !== null && analysis.sma_20 !== undefined) {
+              sma20Html = `<span style="color:#cbd5e1;">$${Number(analysis.sma_20).toFixed(2)}</span>`;
+            }
+            if (analysis.sma_50 !== null && analysis.sma_50 !== undefined) {
+              sma50Html = `<span style="color:#cbd5e1;">$${Number(analysis.sma_50).toFixed(2)}</span>`;
+            }
+            if (analysis.rsi_14 !== null && analysis.rsi_14 !== undefined) {
+              const rsiValue = Number(analysis.rsi_14).toFixed(1);
+              let rsiColor = '#cbd5e1';
+              if (rsiValue > 70) rsiColor = '#fca5a5';
+              else if (rsiValue < 30) rsiColor = '#6ee7b7';
+              rsiHtml = `<span style="color:${rsiColor};">${rsiValue}</span>`;
+            }
           }
           
           tr.innerHTML = `
             <td>${row.symbol}</td>
             <td>${price}</td>
+            <td>${sma20Html}</td>
+            <td>${sma50Html}</td>
+            <td>${rsiHtml}</td>
             <td>${recommendationHtml}</td>
             <td>${confidenceHtml}</td>
             <td class="actions-cell">
