@@ -19,6 +19,7 @@ from flask import Flask, jsonify, render_template, request
 
 import lakebase
 from massive_client import MassiveClient
+import analysis
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("massive-app")
@@ -57,6 +58,28 @@ def ensure_watchlist_table():
             email TEXT NOT NULL,
             latest_price NUMERIC,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (symbol, email)
+        )
+        """
+    )
+
+
+def ensure_analysis_table():
+    """Create the stock_analysis table in Lakebase if it doesn't exist yet."""
+    lakebase.run_write(
+        """
+        CREATE TABLE IF NOT EXISTS stock_analysis (
+            symbol TEXT NOT NULL,
+            email TEXT NOT NULL,
+            current_price NUMERIC,
+            sma_20 NUMERIC,
+            sma_50 NUMERIC,
+            rsi_14 NUMERIC,
+            volume_avg NUMERIC,
+            recommendation TEXT NOT NULL,
+            confidence NUMERIC NOT NULL,
+            reasons JSONB NOT NULL,
+            analyzed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             PRIMARY KEY (symbol, email)
         )
         """
@@ -172,6 +195,97 @@ def delete_from_watchlist(symbol):
     )
     
     return jsonify({"symbol": symbol, "deleted": True})
+
+
+@app.route("/watchlist/<symbol>/analyze", methods=["POST"])
+def analyze_stock(symbol):
+    """
+    Analyze a stock and generate buy/sell/hold recommendation.
+    Fetches historical data, calculates indicators, and stores results.
+    """
+    ensure_analysis_table()
+    
+    symbol = symbol.strip().upper() if isinstance(symbol, str) else ""
+    
+    if not symbol or not _TICKER_RE.match(symbol):
+        return jsonify({"error": f"Invalid ticker symbol: {symbol!r}"}), 400
+    
+    email = _current_user_email()
+    
+    # Perform analysis
+    try:
+        result = analysis.analyze_stock(symbol, days=50)
+    except Exception as e:
+        logger.error(f"Analysis failed for {symbol}: {e}")
+        return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
+    
+    # Store results in database
+    import json as _json
+    lakebase.run_write(
+        """
+        INSERT INTO stock_analysis (
+            symbol, email, current_price, sma_20, sma_50, rsi_14,
+            volume_avg, recommendation, confidence, reasons, analyzed_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+        ON CONFLICT (symbol, email) DO UPDATE
+            SET current_price = EXCLUDED.current_price,
+                sma_20 = EXCLUDED.sma_20,
+                sma_50 = EXCLUDED.sma_50,
+                rsi_14 = EXCLUDED.rsi_14,
+                volume_avg = EXCLUDED.volume_avg,
+                recommendation = EXCLUDED.recommendation,
+                confidence = EXCLUDED.confidence,
+                reasons = EXCLUDED.reasons,
+                analyzed_at = EXCLUDED.analyzed_at
+        """,
+        (
+            symbol,
+            email,
+            result["current_price"],
+            result["sma_20"],
+            result["sma_50"],
+            result["rsi_14"],
+            result["volume_avg"],
+            result["recommendation"],
+            result["confidence"],
+            _json.dumps(result["reasons"]),
+        ),
+    )
+    
+    return jsonify(result)
+
+
+@app.route("/watchlist/analysis", methods=["GET"])
+def get_watchlist_analysis():
+    """
+    Get analysis results for all stocks in the user's watchlist.
+    """
+    ensure_analysis_table()
+    email = _current_user_email()
+    
+    rows = lakebase.run_query(
+        """
+        SELECT
+            symbol,
+            email,
+            current_price,
+            sma_20,
+            sma_50,
+            rsi_14,
+            volume_avg,
+            recommendation,
+            confidence,
+            reasons,
+            analyzed_at
+        FROM stock_analysis
+        WHERE email = %s
+        ORDER BY symbol ASC
+        """,
+        (email,),
+    )
+    
+    return jsonify(rows)
 
 
 @app.route("/watchlist", methods=["POST"])

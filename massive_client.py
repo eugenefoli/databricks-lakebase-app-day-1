@@ -85,3 +85,92 @@ class MassiveClient:
         """
         data = self.get(f"/v2/aggs/ticker/{symbol}/prev")
         return data
+
+    def get_aggregates(self, symbol: str, from_date: str, to_date: str, timespan: str = "day") -> dict:
+        """
+        Fetch historical OHLCV aggregates (bars) for technical analysis.
+
+        Args:
+            symbol: Stock ticker symbol (e.g., 'AAPL')
+            from_date: Start date in YYYY-MM-DD format
+            to_date: End date in YYYY-MM-DD format
+            timespan: Bar size - 'day', 'week', or 'month'. Default: 'day'
+
+        Returns:
+            {
+                "ticker": "AAPL",
+                "queryCount": 50,
+                "resultsCount": 50,
+                "adjusted": true,
+                "results": [
+                    {
+                        "v": 100000000,  # volume
+                        "vw": 150.25,    # volume-weighted average
+                        "o": 149.50,     # open
+                        "c": 151.20,     # close
+                        "h": 152.00,     # high
+                        "l": 149.00,     # low
+                        "t": 1609459200000,  # timestamp (ms)
+                        "n": 500000      # number of transactions
+                    },
+                    ...
+                ]
+            }
+
+        Example:
+            client = MassiveClient()
+            data = client.get_aggregates('AAPL', '2024-01-01', '2024-03-01')
+            closes = [bar['c'] for bar in data.get('results', [])]
+        """
+        path = f"/v2/aggs/ticker/{symbol}/range/1/{timespan}/{from_date}/{to_date}"
+        params = {"adjusted": "true", "sort": "asc"}
+        data = self.get(path, params=params)
+        return data
+
+    def get_ticker_details(self, symbol: str) -> dict:
+        """
+        Fetch company fundamentals and metadata for a stock ticker.
+
+        Args:
+            symbol: Stock ticker symbol (e.g., 'AAPL')
+
+        Returns:
+            {
+                "results": {
+                    "ticker": "AAPL",
+                    "name": "Apple Inc.",
+                    "market": "stocks",
+                    "locale": "us",
+                    "primary_exchange": "XNAS",
+                    "type": "CS",
+                    "active": true,
+                    "currency_name": "usd",
+                    "cik": "0000320193",
+                    "composite_figi": "BBG000B9XRY4",
+                    "share_class_figi": "BBG001S5N8V8",
+                    "market_cap": 2500000000000,
+                    "phone_number": "...",
+                    "address": {...},
+                    "description": "Apple Inc. designs, manufactures...",
+                    "sic_code": "3571",
+                    "sic_description": "Electronic Computers",
+                    "ticker_root": "AAPL",
+                    "homepage_url": "https://www.apple.com",
+                    "total_employees": 164000,
+                    "list_date": "1980-12-12",
+                    "branding": {...},
+                    "share_class_shares_outstanding": 15000000000,
+                    "weighted_shares_outstanding": 15000000000,
+                    "round_lot": 100
+                },
+                "status": "OK"
+            }
+
+        Example:
+            client = MassiveClient()
+            data = client.get_ticker_details('AAPL')
+            market_cap = data.get('results', {}).get('market_cap')
+        """
+        path = f"/v3/reference/tickers/{symbol}"
+        data = self.get(path)
+        return data

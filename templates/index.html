@@ -219,6 +219,105 @@
       transform: translateY(0);
     }
     
+    .analyze-btn {
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: white;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+      margin-right: 8px;
+    }
+    
+    .analyze-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+    }
+    
+    .analyze-btn:active {
+      transform: translateY(0);
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    .badge-buy {
+      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+      color: white;
+    }
+    
+    .badge-sell {
+      background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+      color: white;
+    }
+    
+    .badge-hold {
+      background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+      color: white;
+    }
+    
+    .confidence-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .confidence-bar {
+      flex: 1;
+      height: 8px;
+      background: #e9ecef;
+      border-radius: 4px;
+      overflow: hidden;
+      max-width: 100px;
+    }
+    
+    .confidence-fill {
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+    
+    .confidence-fill.high {
+      background: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+    }
+    
+    .confidence-fill.medium {
+      background: linear-gradient(90deg, #ffc107 0%, #fd7e14 100%);
+    }
+    
+    .confidence-fill.low {
+      background: linear-gradient(90deg, #dc3545 0%, #c82333 100%);
+    }
+    
+    .confidence-text {
+      font-size: 13px;
+      font-weight: 600;
+      color: #495057;
+      min-width: 40px;
+    }
+    
+    .reasons {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+    
+    .actions-cell {
+      white-space: nowrap;
+    }
+    
     @media (max-width: 768px) {
       body {
         padding: 20px 10px;
@@ -272,9 +371,9 @@
             <thead>
               <tr>
                 <th>Symbol</th>
-                <th>Email</th>
                 <th>Latest Price</th>
-                <th>Updated</th>
+                <th>Recommendation</th>
+                <th>Confidence</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -292,20 +391,63 @@
 
     async function loadWatchlist() {
       try {
-        const resp = await fetch("/watchlist");
-        const data = await resp.json();
-        if (!resp.ok) {
-          resultEl.textContent = "Error loading watchlist: " + (data.error || resp.statusText);
+        // Fetch watchlist and analysis data in parallel
+        const [watchlistResp, analysisResp] = await Promise.all([
+          fetch("/watchlist"),
+          fetch("/watchlist/analysis")
+        ]);
+        
+        const watchlistData = await watchlistResp.json();
+        const analysisData = await analysisResp.json();
+        
+        if (!watchlistResp.ok) {
+          resultEl.textContent = "Error loading watchlist: " + (watchlistData.error || watchlistResp.statusText);
           return;
         }
+        
+        // Create analysis lookup map
+        const analysisMap = {};
+        analysisData.forEach(a => {
+          analysisMap[a.symbol] = a;
+        });
+        
         watchlistBody.innerHTML = "";
-        data.forEach((row) => {
+        watchlistData.forEach((row) => {
           const tr = document.createElement("tr");
           const price = row.latest_price !== null && row.latest_price !== undefined
             ? "$" + Number(row.latest_price).toFixed(2)
             : "-";
-          const updated = row.updated_at ? new Date(row.updated_at).toLocaleString() : "-";
-          tr.innerHTML = `<td>${row.symbol}</td><td>${row.email || "-"}</td><td>${price}</td><td>${updated}</td><td><button class="delete-btn" onclick="deleteStock('${row.symbol}')">Delete</button></td>`;
+          
+          const analysis = analysisMap[row.symbol];
+          let recommendationHtml = '<span style="color:#999;">Not analyzed</span>';
+          let confidenceHtml = '-';
+          
+          if (analysis) {
+            const rec = analysis.recommendation;
+            const conf = (analysis.confidence * 100).toFixed(0);
+            const confClass = conf >= 70 ? 'high' : conf >= 40 ? 'medium' : 'low';
+            
+            recommendationHtml = `<span class="badge badge-${rec.toLowerCase()}">${rec}</span>`;
+            confidenceHtml = `
+              <div class="confidence-container">
+                <div class="confidence-bar">
+                  <div class="confidence-fill ${confClass}" style="width: ${conf}%"></div>
+                </div>
+                <span class="confidence-text">${conf}%</span>
+              </div>
+            `;
+          }
+          
+          tr.innerHTML = `
+            <td>${row.symbol}</td>
+            <td>${price}</td>
+            <td>${recommendationHtml}</td>
+            <td>${confidenceHtml}</td>
+            <td class="actions-cell">
+              <button class="analyze-btn" onclick="analyzeStock('${row.symbol}')">Analyze</button>
+              <button class="delete-btn" onclick="deleteStock('${row.symbol}')">Delete</button>
+            </td>
+          `;
           watchlistBody.appendChild(tr);
         });
       } catch (err) {
@@ -360,7 +502,27 @@
       }
     }
     
+    async function analyzeStock(symbol) {
+      resultEl.textContent = `Analyzing ${symbol}... This may take a few seconds.`;
+      
+      try {
+        const resp = await fetch(`/watchlist/${symbol}/analyze`, {
+          method: "POST",
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          resultEl.textContent = "Error: " + (data.error || resp.statusText);
+          return;
+        }
+        resultEl.textContent = `✓ Analysis complete for ${symbol}: ${data.recommendation} (${(data.confidence * 100).toFixed(0)}% confidence)`;
+        loadWatchlist();
+      } catch (err) {
+        resultEl.textContent = "Request failed: " + err;
+      }
+    }
+    
     window.deleteStock = deleteStock;
+    window.analyzeStock = analyzeStock;
 
     loadWatchlist();
   </script>
